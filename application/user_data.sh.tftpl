@@ -1,0 +1,79 @@
+
+#!/bin/bash
+set -euxo pipefail
+
+# Log the EC2 startup process.
+exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+# Install Apache and Python.
+dnf update -y
+dnf install -y httpd python3 python3-pip policycoreutils policycoreutils-python-utils
+
+# Create the application directory.
+mkdir -p /opt/flask-app
+
+# Copy the Flask application and dependencies.
+echo '${app_source_base64}' | base64 -d > /opt/flask-app/app.py
+echo '${requirements_base64}' | base64 -d > /opt/flask-app/requirements.txt
+
+# Create an isolated Python virtual environment.
+python3 -m venv /opt/flask-app/venv
+
+# Install application dependencies.
+/opt/flask-app/venv/bin/pip install --upgrade pip
+/opt/flask-app/venv/bin/pip install -r /opt/flask-app/requirements.txt
+
+# Give the application user ownership of its files.
+chown -R ec2-user:ec2-user /opt/flask-app
+
+# Allow Apache to connect to the local Gunicorn application.
+setsebool -P httpd_can_network_connect 1
+
+# Configure database access.
+cat > /etc/sysconfig/flask-app <<'EOF'
+DB_SECRET_ARN=${db_secret_arn}
+AWS_REGION=${aws_region}
+DB_NAME=appdb
+EOF
+
+chmod 600 /etc/sysconfig/flask-app
+
+# Create a systemd service for Gunicorn.
+cat > /etc/systemd/system/flask-app.service <<'EOF'
+[Unit]
+Description=Flask Application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/flask-app
+EnvironmentFile=/etc/sysconfig/flask-app
+ExecStart=/opt/flask-app/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5000 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Configure Apache as a reverse proxy.
+cat > /etc/httpd/conf.d/flask-app.conf <<'EOF'
+ProxyRequests Off
+ProxyPreserveHost On
+
+ProxyPass /health http://127.0.0.1:5000/health
+ProxyPassReverse /health http://127.0.0.1:5000/health
+
+ProxyPass / http://127.0.0.1:5000/
+ProxyPassReverse / http://127.0.0.1:5000/
+EOF
+
+# Verify Apache configuration before starting services.
+httpd -t
+
+# Enable and start the application and Apache.
+systemctl daemon-reload
+systemctl enable --now flask-app
+systemctl enable --now httpd

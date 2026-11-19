@@ -1,0 +1,38 @@
+# Terraform working directory
+**/.terraform/*
+
+# Terraform state and backup files
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+terraform.tfstate.d
+*.tfplan
+
+# Local Terraform variables (may contain credentials)
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Terraform crash logs
+crash.log
+crash.*.log
+
+# Credentials and environment files
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs and local temporary files
+*.log
+*.tmp
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Python generated files
+__pycache__/
+*.py[cod]
